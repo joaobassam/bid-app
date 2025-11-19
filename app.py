@@ -1,10 +1,69 @@
-import io
 import zipfile
 import pandas as pd
 import streamlit as st
 
-ZIP_PATH = "bid.csv.zip"   # arquivo zip subido no GitHub
-CSV_NAME_INSIDE_ZIP = "bid.csv"  # nome do CSV dentro do ZIP
+ZIP_PATH = "bid.csv.zip"          # arquivo zipado no repo
+CSV_NAME_INSIDE_ZIP = "bid.csv"   # nome do CSV dentro do ZIP
+
+
+# ------------- NORMALIZAÇÃO DE COLUNAS -------------
+
+def normalizar_colunas(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Recebe o DataFrame original do CSV e renomeia as colunas
+    para nomes 'padrão' usados no app, como:
+    nome_completo, inscricao, contrato, data, inicio,
+    cbf, apelido, nascimento, time, idade
+    """
+
+    col_map = {}
+    for orig in df.columns:
+        low = orig.strip().lower()
+
+        if "nome" in low and "completo" in low:
+            col_map[orig] = "nome_completo"
+        elif "inscri" in low:  # INSCRIÇÃO / INSCRICAO
+            col_map[orig] = "inscricao"
+        elif "contrato" in low:
+            col_map[orig] = "contrato"
+        elif "início" in low or "inicio" in low:
+            col_map[orig] = "inicio"
+        elif low == "data" or "data " in low:
+            col_map[orig] = "data"
+        elif "cbf" in low:
+            col_map[orig] = "cbf"
+        elif "apelido" in low:
+            col_map[orig] = "apelido"
+        elif "nascimento" in low:
+            col_map[orig] = "nascimento"
+        elif "time" in low or "clube" in low or "equipe" in low:
+            col_map[orig] = "time"
+        elif "idade" in low:
+            col_map[orig] = "idade"
+
+    df = df.rename(columns=col_map)
+
+    # garantir que todas as colunas esperadas existem (mesmo que vazias)
+    colunas_esperadas = [
+        "nome_completo",
+        "inscricao",
+        "contrato",
+        "data",
+        "inicio",
+        "cbf",
+        "apelido",
+        "nascimento",
+        "time",
+        "idade",
+    ]
+    for col in colunas_esperadas:
+        if col not in df.columns:
+            df[col] = pd.NA
+
+    # organizar colunas na ordem padrão
+    df = df[colunas_esperadas]
+
+    return df
 
 
 # ---------------- CARREGAR DADOS ----------------
@@ -13,19 +72,19 @@ CSV_NAME_INSIDE_ZIP = "bid.csv"  # nome do CSV dentro do ZIP
 def load_data():
     """
     Lê o arquivo bid.csv de dentro do bid.csv.zip
-    e devolve um DataFrame pandas.
+    e devolve um DataFrame pandas já com colunas normalizadas.
     """
     with zipfile.ZipFile(ZIP_PATH, "r") as z:
         with z.open(CSV_NAME_INSIDE_ZIP) as f:
-            # ajuste o 'sep' se necessário: ';' ou ','
-            df = pd.read_csv(f, sep=",", dtype=str)  # tudo como texto para evitar problemas
-    # padronizar nomes de colunas (se quiser garantir):
-    df.columns = [c.strip().lower() for c in df.columns]
+            # ajuste sep=";" se seu CSV for separado por ponto e vírgula
+            df = pd.read_csv(f, sep=",", dtype=str)
 
-    # aqui assumo que as colunas têm esses nomes:
-    # nome_completo, inscricao, contrato, data, inicio,
-    # cbf, apelido, nascimento, time, idade
-    # se forem diferentes, me manda que eu ajusto
+    df = normalizar_colunas(df)
+
+    # garantir tudo como string para evitar problemas
+    for c in df.columns:
+        df[c] = df[c].astype("string")
+
     return df
 
 
@@ -51,7 +110,6 @@ def search_jogadores(df, nome_busca, time_filtro, limite=200):
     if time_filtro and time_filtro != "Todos":
         df2 = df2[df2["time"] == time_filtro]
 
-    # selecionar colunas na ordem desejada
     cols = [
         "nome_completo",
         "apelido",
@@ -157,7 +215,6 @@ def main():
                 st.write(f"Registros encontrados: **{len(df_res)}** (limite {limite})")
                 st.dataframe(df_res, use_container_width=True)
 
-                # opção para exportar
                 csv_out = df_res.to_csv(index=False, sep=";").encode("utf-8-sig")
                 st.download_button(
                     "⬇️ Baixar resultados em CSV",
@@ -193,7 +250,7 @@ def main():
                 if df_det.empty:
                     st.warning("Nenhum jogador encontrado com esse nome.")
                 else:
-                    nomes_unicos = df_det["nome_completo"].unique()
+                    nomes_unicos = df_det["nome_completo"].dropna().unique()
 
                     st.write(f"Jogadores encontrados: **{len(nomes_unicos)}**")
                     st.write("Clique em cada nome abaixo para ver os detalhes:")
@@ -259,4 +316,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
