@@ -1,24 +1,32 @@
+import os
+import glob
 import zipfile
 import pandas as pd
 import streamlit as st
 
-ZIP_PATH = "bid.csv.zip"          # arquivo zipado no repo
-CSV_NAME_INSIDE_ZIP = "bid.csv"   # nome do CSV dentro do ZIP
+
+# =========================
+# CONFIG
+# =========================
+# Padrão: pega todos os arquivos no formato bid*.csv.zip (bid.csv.zip, bid2.csv.zip, ...)
+ZIP_GLOB_PATTERN = "bid*.csv.zip"
+
+# Se quiser travar uma lista fixa (em vez de auto-descobrir), preencha e use.
+# Ex.: FIXED_ZIPS = ["bid.csv.zip", "bid2.csv.zip", "bid3.csv.zip"]
+FIXED_ZIPS = None  # ou uma lista
 
 
-# ------------- NORMALIZAÇÃO DE COLUNAS -------------
-
+# =========================
+# NORMALIZAÇÃO DE COLUNAS
+# =========================
 def normalizar_colunas(df: pd.DataFrame) -> pd.DataFrame:
     """
     Recebe o DataFrame original do CSV e renomeia as colunas
-    para nomes 'padrão' usados no app, como:
-    nome_completo, inscricao, contrato, data, inicio,
-    cbf, apelido, nascimento, time, idade
+    para nomes 'padrão' usados no app.
     """
-
     col_map = {}
     for orig in df.columns:
-        low = orig.strip().lower()
+        low = str(orig).strip().lower()
 
         if "nome" in low and "completo" in low:
             col_map[orig] = "nome_completo"
@@ -43,7 +51,6 @@ def normalizar_colunas(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.rename(columns=col_map)
 
-    # garantir que todas as colunas esperadas existem (mesmo que vazias)
     colunas_esperadas = [
         "nome_completo",
         "inscricao",
@@ -60,31 +67,82 @@ def normalizar_colunas(df: pd.DataFrame) -> pd.DataFrame:
         if col not in df.columns:
             df[col] = pd.NA
 
-    # organizar colunas na ordem padrão
     df = df[colunas_esperadas]
-
     return df
 
 
-# ---------------- CARREGAR DADOS ----------------
+# =========================
+# DESCOBRIR FONTES
+# =========================
+def discover_zip_files() -> list[str]:
+    """
+    Retorna uma lista de arquivos .zip a serem carregados.
+    Por padrão, auto-descobre com glob (bid*.csv.zip), mas você pode fixar via FIXED_ZIPS.
+    """
+    if isinstance(FIXED_ZIPS, list) and FIXED_ZIPS:
+        return [z for z in FIXED_ZIPS if os.path.exists(z)]
+
+    zips = sorted(glob.glob(ZIP_GLOB_PATTERN))
+    return zips
+
+
+def file_signature(path: str) -> tuple:
+    """
+    Assinatura simples para invalidar cache quando o arquivo muda.
+    """
+    try:
+        stt = os.stat(path)
+        return (os.path.basename(path), stt.st_size, int(stt.st_mtime))
+    except FileNotFoundError:
+        return (os.path.basename(path), 0, 0)
+
+
+# =========================
+# CARREGAR DADOS (MULTI-ZIP)
+# =========================
+def _find_csv_inside_zip(z: zipfile.ZipFile) -> str:
+    """
+    Encontra o CSV dentro do ZIP. Prioriza *.csv.
+    """
+    names = z.namelist()
+    csvs = [n for n in names if n.lower().endswith(".csv")]
+    if not csvs:
+        raise FileNotFoundError("Nenhum arquivo .csv encontrado dentro do ZIP.")
+    # Se tiver mais de um, pega o primeiro em ordem alfabética
+    return sorted(csvs)[0]
+
 
 @st.cache_data
-def load_data():
+def load_data(zip_paths: tuple, signatures: tuple):
     """
-    Lê o arquivo bid.csv de dentro do bid.csv.zip
-    e devolve um DataFrame pandas já com colunas normalizadas.
+    Lê vários ZIPs e concatena em um único DataFrame.
+    `signatures` serve só para o cache perceber mudanças nos arquivos.
     """
-    with zipfile.ZipFile(ZIP_PATH, "r") as z:
-        with z.open(CSV_NAME_INSIDE_ZIP) as f:
-            # ajuste sep=";" se seu CSV for separado por ponto e vírgula
-            df = pd.read_csv(f, sep=",", dtype=str)
+    frames = []
 
-    df = normalizar_colunas(df)
+    for zip_path in zip_paths:
+        with zipfile.ZipFile(zip_path, "r") as z:
+            csv_inside = _find_csv_inside_zip(z)
+            with z.open(csv_inside) as f:
+                df_part = pd.read_csv(f, sep=",", dtype=str)
 
-    # garantir tudo como string para evitar problemas
-    for c in df.columns:
-        df[c] = df[c].astype("string")
+        df_part = normalizar_colunas(df_part)
 
+        # garantir tudo como string para evitar problemas
+        for c in df_part.columns:
+            df_part[c] = df_part[c].astype("string")
+
+        # opcional: registrar fonte (ajuda debug e auditoria)
+        df_part["__fonte_zip"] = os.path.basename(zip_path)
+
+        frames.append(df_part)
+
+    if not frames:
+        raise FileNotFoundError(
+            f"Nenhum arquivo encontrado. Esperado algo como '{ZIP_GLOB_PATTERN}' no diretório do app."
+        )
+
+    df = pd.concat(frames, ignore_index=True)
     return df
 
 
@@ -97,16 +155,14 @@ def get_times(df):
 
 @st.cache_data
 def search_jogadores(df, nome_busca, time_filtro, limite=200):
-    df2 = df.copy()
+    df2 = df
 
-    # filtro por nome / apelido (contendo texto)
     if nome_busca:
         nome_busca = nome_busca.strip()
         mask_nome = df2["nome_completo"].str.contains(nome_busca, case=False, na=False)
         mask_apelido = df2["apelido"].str.contains(nome_busca, case=False, na=False)
         df2 = df2[mask_nome | mask_apelido]
 
-    # filtro por time
     if time_filtro and time_filtro != "Todos":
         df2 = df2[df2["time"] == time_filtro]
 
@@ -130,7 +186,7 @@ def search_jogadores(df, nome_busca, time_filtro, limite=200):
 
 @st.cache_data
 def get_detalhes_jogador(df, nome_parte):
-    df2 = df.copy()
+    df2 = df
     nome_parte = nome_parte.strip()
     mask = df2["nome_completo"].str.contains(nome_parte, case=False, na=False)
     df2 = df2[mask]
@@ -153,20 +209,28 @@ def get_detalhes_jogador(df, nome_parte):
     return df2
 
 
-# ---------------- APP PRINCIPAL ----------------
-
+# =========================
+# APP PRINCIPAL
+# =========================
 def main():
     st.set_page_config(page_title="Consulta BID", layout="wide")
 
     st.title("📚 Banco BID – Consulta e Detalhes de Jogadores (CSV)")
-    st.write("Interface web usando dados do arquivo `bid.csv` compactado em `bid.csv.zip`.")
+    st.write(
+        "Interface web usando múltiplos arquivos `bid*.csv.zip` (ex.: `bid.csv.zip`, `bid2.csv.zip`, ...)."
+    )
+
+    zip_files = discover_zip_files()
+    signatures = tuple(file_signature(p) for p in zip_files)
 
     # carregar dados
     try:
-        df = load_data()
+        df = load_data(tuple(zip_files), signatures)
     except Exception as e:
         st.error(f"Erro ao carregar dados do CSV: {e}")
         st.stop()
+
+    st.caption(f"Arquivos carregados: {len(zip_files)} | Linhas totais: {len(df):,}".replace(",", "."))
 
     # Abas principais
     aba_consulta, aba_detalhes = st.tabs(["🔍 Consulta", "🧑‍💼 Detalhes do jogador"])
@@ -316,5 +380,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
