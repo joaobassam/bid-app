@@ -286,115 +286,25 @@ def main():
         opcoes_times = ["Todos"] + times
         time_filtro = st.sidebar.selectbox("Filtrar por time (Consulta)", opcoes_times)
 
-        # Filtro amigável por período da coluna DATA
+        # Filtro por intervalo da coluna DATA
         data_minima, data_maxima = get_limites_data(df)
         data_inicial = None
         data_final = None
-        periodo_valido = True
-        opcao_periodo = "Todas as datas"
 
         if data_minima is not None and data_maxima is not None:
-            st.sidebar.markdown("### Período")
-
-            opcao_periodo = st.sidebar.selectbox(
-                "Filtrar pela data",
-                [
-                    "Todas as datas",
-                    "Últimos 30 dias",
-                    "Últimos 90 dias",
-                    "Últimos 12 meses",
-                    "Ano mais recente da base",
-                    "Ano anterior ao mais recente",
-                    "Intervalo personalizado",
-                ],
-                help=(
-                    "Escolha um período pronto ou selecione "
-                    "'Intervalo personalizado' para informar as datas."
-                ),
+            periodo = st.sidebar.date_input(
+                "Período da data (Consulta)",
+                value=(data_minima, data_maxima),
+                min_value=data_minima,
+                max_value=data_maxima,
+                format="DD/MM/YYYY",
+                help="Selecione a data inicial e a data final da coluna DATA.",
             )
 
-            data_referencia = pd.Timestamp(data_maxima)
-
-            if opcao_periodo == "Últimos 30 dias":
-                data_final = data_maxima
-                data_inicial = max(
-                    data_minima,
-                    (data_referencia - pd.DateOffset(days=29)).date(),
-                )
-
-            elif opcao_periodo == "Últimos 90 dias":
-                data_final = data_maxima
-                data_inicial = max(
-                    data_minima,
-                    (data_referencia - pd.DateOffset(days=89)).date(),
-                )
-
-            elif opcao_periodo == "Últimos 12 meses":
-                data_final = data_maxima
-                data_inicial = max(
-                    data_minima,
-                    (data_referencia - pd.DateOffset(months=12)).date(),
-                )
-
-            elif opcao_periodo == "Ano mais recente da base":
-                ano_referencia = data_referencia.year
-                data_inicial = max(
-                    data_minima,
-                    pd.Timestamp(ano_referencia, 1, 1).date(),
-                )
-                data_final = data_maxima
-
-            elif opcao_periodo == "Ano anterior ao mais recente":
-                ano_anterior = data_referencia.year - 1
-                inicio_ano = pd.Timestamp(ano_anterior, 1, 1).date()
-                fim_ano = pd.Timestamp(ano_anterior, 12, 31).date()
-
-                data_inicial = max(data_minima, inicio_ano)
-                data_final = min(data_maxima, fim_ano)
-
-                if data_inicial > data_final:
-                    periodo_valido = False
-                    st.sidebar.warning(
-                        "Não há registros no ano anterior ao ano mais recente da base."
-                    )
-
-            elif opcao_periodo == "Intervalo personalizado":
-                col_data_inicio, col_data_fim = st.sidebar.columns(2)
-
-                with col_data_inicio:
-                    data_inicial = st.date_input(
-                        "Data inicial",
-                        value=data_minima,
-                        format="DD/MM/YYYY",
-                        key="consulta_data_inicial",
-                    )
-
-                with col_data_fim:
-                    data_final = st.date_input(
-                        "Data final",
-                        value=data_maxima,
-                        format="DD/MM/YYYY",
-                        key="consulta_data_final",
-                    )
-
-                if data_inicial > data_final:
-                    periodo_valido = False
-                    st.sidebar.error(
-                        "A data inicial não pode ser posterior à data final."
-                    )
-
-            if data_inicial is not None and data_final is not None and periodo_valido:
-                st.sidebar.caption(
-                    "Período selecionado: "
-                    f"{data_inicial.strftime('%d/%m/%Y')} a "
-                    f"{data_final.strftime('%d/%m/%Y')}"
-                )
-            elif opcao_periodo == "Todas as datas":
-                st.sidebar.caption(
-                    "Nenhum filtro de data será aplicado. "
-                    f"Base: {data_minima.strftime('%d/%m/%Y')} a "
-                    f"{data_maxima.strftime('%d/%m/%Y')}."
-                )
+            if isinstance(periodo, (tuple, list)) and len(periodo) == 2:
+                data_inicial, data_final = periodo
+            else:
+                st.sidebar.warning("Selecione a data inicial e a data final.")
         else:
             st.sidebar.warning("A coluna DATA não possui valores válidos para filtro.")
 
@@ -411,8 +321,8 @@ def main():
         st.sidebar.info("Use os filtros e clique em **Buscar (Consulta)** para ver os resultados.")
 
         if st.sidebar.button("Buscar (Consulta)"):
-            if not periodo_valido:
-                st.warning("Corrija o período selecionado para realizar a busca.")
+            if data_minima is not None and data_maxima is not None and (data_inicial is None or data_final is None):
+                st.warning("Selecione as duas datas do período para realizar a busca.")
                 st.stop()
 
             df_res = search_jogadores(
