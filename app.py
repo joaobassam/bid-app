@@ -143,6 +143,15 @@ def load_data(zip_paths: tuple, signatures: tuple):
         )
 
     df = pd.concat(frames, ignore_index=True)
+
+    # Coluna auxiliar para filtros e ordenação por data.
+    # Mantemos a coluna original `data` como texto para exibição e exportação.
+    df["__data_dt"] = pd.to_datetime(
+        df["data"].astype("string").str.strip(),
+        dayfirst=True,
+        errors="coerce",
+    )
+
     return df
 
 
@@ -154,7 +163,23 @@ def get_times(df):
 
 
 @st.cache_data
-def search_jogadores(df, nome_busca, time_filtro, limite=200):
+def get_limites_data(df):
+    """Retorna a menor e a maior data válidas disponíveis na base."""
+    datas = df["__data_dt"].dropna()
+    if datas.empty:
+        return None, None
+    return datas.min().date(), datas.max().date()
+
+
+@st.cache_data
+def search_jogadores(
+    df,
+    nome_busca,
+    time_filtro,
+    data_inicial=None,
+    data_final=None,
+    limite=200,
+):
     df2 = df
 
     if nome_busca:
@@ -165,6 +190,11 @@ def search_jogadores(df, nome_busca, time_filtro, limite=200):
 
     if time_filtro and time_filtro != "Todos":
         df2 = df2[df2["time"] == time_filtro]
+
+    if data_inicial is not None and data_final is not None:
+        inicio = pd.Timestamp(data_inicial)
+        fim = pd.Timestamp(data_final)
+        df2 = df2[df2["__data_dt"].between(inicio, fim, inclusive="both")]
 
     cols = [
         "nome_completo",
@@ -180,7 +210,7 @@ def search_jogadores(df, nome_busca, time_filtro, limite=200):
     ]
     df2 = df2[cols]
 
-    df2 = df2.sort_values("nome_completo").head(limite)
+    df2 = df2.sort_values(["nome_completo", "data"], na_position="last").head(limite)
     return df2
 
 
@@ -256,6 +286,28 @@ def main():
         opcoes_times = ["Todos"] + times
         time_filtro = st.sidebar.selectbox("Filtrar por time (Consulta)", opcoes_times)
 
+        # Filtro por intervalo da coluna DATA
+        data_minima, data_maxima = get_limites_data(df)
+        data_inicial = None
+        data_final = None
+
+        if data_minima is not None and data_maxima is not None:
+            periodo = st.sidebar.date_input(
+                "Período da data (Consulta)",
+                value=(data_minima, data_maxima),
+                min_value=data_minima,
+                max_value=data_maxima,
+                format="DD/MM/YYYY",
+                help="Selecione a data inicial e a data final da coluna DATA.",
+            )
+
+            if isinstance(periodo, (tuple, list)) and len(periodo) == 2:
+                data_inicial, data_final = periodo
+            else:
+                st.sidebar.warning("Selecione a data inicial e a data final.")
+        else:
+            st.sidebar.warning("A coluna DATA não possui valores válidos para filtro.")
+
         limite = st.sidebar.slider(
             "Limite de resultados (Consulta)",
             min_value=50,
@@ -269,7 +321,18 @@ def main():
         st.sidebar.info("Use os filtros e clique em **Buscar (Consulta)** para ver os resultados.")
 
         if st.sidebar.button("Buscar (Consulta)"):
-            df_res = search_jogadores(df, nome_busca, time_filtro, limite=limite)
+            if data_minima is not None and data_maxima is not None and (data_inicial is None or data_final is None):
+                st.warning("Selecione as duas datas do período para realizar a busca.")
+                st.stop()
+
+            df_res = search_jogadores(
+                df,
+                nome_busca,
+                time_filtro,
+                data_inicial=data_inicial,
+                data_final=data_final,
+                limite=limite,
+            )
 
             st.subheader("Resultados da busca (Consulta geral)")
 
