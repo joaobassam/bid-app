@@ -365,8 +365,6 @@ def main():
                     data_inicial = st.date_input(
                         "Data inicial",
                         value=data_minima,
-                        min_value=data_minima,
-                        max_value=data_maxima,
                         format="DD/MM/YYYY",
                         key="consulta_data_inicial",
                     )
@@ -375,8 +373,6 @@ def main():
                     data_final = st.date_input(
                         "Data final",
                         value=data_maxima,
-                        min_value=data_minima,
-                        max_value=data_maxima,
                         format="DD/MM/YYYY",
                         key="consulta_data_final",
                     )
