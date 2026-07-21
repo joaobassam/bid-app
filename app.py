@@ -171,6 +171,22 @@ def get_limites_data(df):
     return datas.min().date(), datas.max().date()
 
 
+def parse_data_livre(valor: str):
+    """Converte uma data digitada em DD/MM/AAAA sem limitar o ano."""
+    valor = str(valor).strip()
+    if not valor:
+        return None
+
+    try:
+        return pd.to_datetime(
+            valor,
+            format="%d/%m/%Y",
+            errors="raise",
+        ).date()
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
 @st.cache_data
 def search_jogadores(
     df,
@@ -359,25 +375,38 @@ def main():
                     )
 
             elif opcao_periodo == "Intervalo personalizado":
+                st.sidebar.caption(
+                    "Digite as datas no formato DD/MM/AAAA. "
+                    "Não há limite mínimo ou máximo de ano."
+                )
+
                 col_data_inicio, col_data_fim = st.sidebar.columns(2)
 
                 with col_data_inicio:
-                    data_inicial = st.date_input(
+                    data_inicial_texto = st.text_input(
                         "Data inicial",
-                        value=data_minima,
-                        format="DD/MM/YYYY",
-                        key="consulta_data_inicial",
+                        value=data_minima.strftime("%d/%m/%Y"),
+                        placeholder="DD/MM/AAAA",
+                        key="consulta_data_inicial_livre",
                     )
 
                 with col_data_fim:
-                    data_final = st.date_input(
+                    data_final_texto = st.text_input(
                         "Data final",
-                        value=data_maxima,
-                        format="DD/MM/YYYY",
-                        key="consulta_data_final",
+                        value=data_maxima.strftime("%d/%m/%Y"),
+                        placeholder="DD/MM/AAAA",
+                        key="consulta_data_final_livre",
                     )
 
-                if data_inicial > data_final:
+                data_inicial = parse_data_livre(data_inicial_texto)
+                data_final = parse_data_livre(data_final_texto)
+
+                if data_inicial is None or data_final is None:
+                    periodo_valido = False
+                    st.sidebar.error(
+                        "Informe datas válidas no formato DD/MM/AAAA."
+                    )
+                elif data_inicial > data_final:
                     periodo_valido = False
                     st.sidebar.error(
                         "A data inicial não pode ser posterior à data final."
