@@ -145,12 +145,30 @@ def load_data(zip_paths: tuple, signatures: tuple):
     df = pd.concat(frames, ignore_index=True)
 
     # Coluna auxiliar para filtros e ordenação por data.
+    # Aceita datas simples e datas com horário, por exemplo:
+    # 31/12/2025, 31/12/2025 14:30:00 e 2025-12-31 14:30:00.
     # Mantemos a coluna original `data` como texto para exibição e exportação.
-    df["__data_dt"] = pd.to_datetime(
-        df["data"].astype("string").str.strip(),
-        dayfirst=True,
-        errors="coerce",
-    )
+    valores_data = df["data"].astype("string").str.strip()
+
+    try:
+        # Pandas 2.x: `mixed` permite formatos diferentes na mesma coluna.
+        datas_convertidas = pd.to_datetime(
+            valores_data,
+            format="mixed",
+            dayfirst=True,
+            errors="coerce",
+        )
+    except (TypeError, ValueError):
+        # Compatibilidade com versões mais antigas do pandas.
+        datas_convertidas = pd.to_datetime(
+            valores_data,
+            dayfirst=True,
+            errors="coerce",
+        )
+
+    # Normaliza para meia-noite, descartando somente a hora da coluna auxiliar.
+    # Isso garante que qualquer horário dentro do dia seja incluído no filtro.
+    df["__data_dt"] = datas_convertidas.dt.normalize()
 
     return df
 
@@ -208,8 +226,10 @@ def search_jogadores(
         df2 = df2[df2["time"] == time_filtro]
 
     if data_inicial is not None and data_final is not None:
-        inicio = pd.Timestamp(data_inicial)
-        fim = pd.Timestamp(data_final)
+        # A coluna auxiliar já está normalizada por dia. Assim, registros com
+        # horário (por exemplo 30/06/2025 18:45:00) entram normalmente no filtro.
+        inicio = pd.Timestamp(data_inicial).normalize()
+        fim = pd.Timestamp(data_final).normalize()
         df2 = df2[df2["__data_dt"].between(inicio, fim, inclusive="both")]
 
     cols = [
